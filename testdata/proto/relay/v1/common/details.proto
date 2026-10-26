@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package relay.test.common;
+
+import "google/protobuf/timestamp.proto";
+
+message Details {
+  string label = 1;
+  google.protobuf.Timestamp created_at = 2;
+}

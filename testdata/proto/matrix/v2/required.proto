@@ -1,0 +1,21 @@
+syntax = "proto2";
+
+package relay.test.matrix2;
+
+message RequiredNode {
+  required string required_text = 1;
+  optional int32 default_number = 2 [default = 17];
+  optional NonZeroEnum choice = 3 [default = SECOND];
+  optional RequiredNode child = 4;
+  repeated RequiredNode children = 5;
+  extensions 100 to 199;
+}
+
+enum NonZeroEnum {
+  FIRST = 5;
+  SECOND = 8;
+}
+
+extend RequiredNode {
+  optional string label = 100;
+}

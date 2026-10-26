@@ -1,0 +1,83 @@
+name: Local unsigned release packages
+
+# Manual build only. This workflow does not create tags, releases or deployments.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without v prefix, for example 0.1.0-rc.1'
+        required: true
+        type: string
+      source_date_epoch:
+        description: 'Optional fixed Unix timestamp; empty uses source commit time'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux/amd64
+            label: linux-amd64
+          - os: windows-latest
+            target: windows/amd64
+            label: windows-amd64
+          - os: macos-15
+            target: native
+            label: darwin-native
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_EPOCH: ${{ inputs.source_date_epoch }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: |
+            go.sum
+            cmd/desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Check source and release tooling
+        shell: bash
+        run: |
+          go test ./tools/release ./internal/buildinfo
+          go vet ./tools/release ./internal/buildinfo
+          if [ -z "$RELEASE_EPOCH" ]; then
+            RELEASE_EPOCH="$(git show -s --format=%ct HEAD)"
+          fi
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$RELEASE_EPOCH" >> "$GITHUB_ENV"
+          if [ "$RELEASE_TARGET" = "native" ]; then
+            printf 'RELEASE_TARGET=%s/%s\n' "$(go env GOOS)" "$(go env GOARCH)" >> "$GITHUB_ENV"
+          fi
+      - name: Build unsigned packages
+        shell: bash
+        run: >-
+          go run ./tools/release --version "$RELEASE_VERSION"
+          --commit "$GITHUB_SHA" --target "$RELEASE_TARGET"
+          --out "$RUNNER_TEMP/relay-release"
+      - name: Verify local archives without executing them
+        shell: bash
+        run: >-
+          go run ./tools/release --verify "$RUNNER_TEMP/relay-release"
+          --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
+      - name: Upload workflow artifacts only
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-${{ matrix.label }}-unsigned
+          path: ${{ runner.temp }}/relay-release/*
+          if-no-files-found: error
+          retention-days: 14

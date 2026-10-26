@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Relay
+Comment=Local HTTP, gRPC and WebSocket API client
+Exec=relay
+Icon=relay
+Terminal=false
+Categories=Development;Network;
+StartupWMClass=Relay
