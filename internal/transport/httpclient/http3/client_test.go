@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	quichttp3 "github.com/quic-go/quic-go/http3"
 )
 
@@ -108,18 +109,68 @@ func TestCancelBlockedRead(t *testing.T) {
 }
 
 func TestNoTCPFallback(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
-	defer server.Close()
-	client, _ := New(Config{Timeout: 100 * time.Millisecond})
-	defer client.Close()
-	req, _ := http.NewRequest("GET", server.URL, nil)
-	_, err := client.Do(req)
-	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "QUIC") {
-		t.Fatalf("missing QUIC timeout: %v", err)
-	}
-	if calls.Load() != 0 {
-		t.Fatal("fell back to TCP")
+	for _, test := range []struct {
+		name             string
+		clientTimeout    time.Duration
+		requestTimeout   time.Duration
+		handshakeTimeout time.Duration
+	}{
+		{name: "request deadline", clientTimeout: 5 * time.Second, requestTimeout: 100 * time.Millisecond},
+		{name: "QUIC deadline", clientTimeout: 5 * time.Second, requestTimeout: 5 * time.Second, handshakeTimeout: 100 * time.Millisecond},
+		{name: "equal deadlines", clientTimeout: 100 * time.Millisecond, requestTimeout: 5 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var tcpConnections atomic.Int32
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			// Count connections even when a forbidden TCP fallback would fail
+			// certificate verification before reaching the HTTP handler.
+			server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+				if state == http.StateNew {
+					tcpConnections.Add(1)
+				}
+			}
+			server.StartTLS()
+			t.Cleanup(server.Close)
+			// Keep UDP silent on the same port, without relying on how the OS
+			// reports packets sent to a closed UDP port.
+			udp, err := net.ListenPacket("udp", server.Listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = udp.Close() })
+			client, err := New(Config{Timeout: test.clientTimeout})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = client.Close() })
+			if test.handshakeTimeout != 0 {
+				client.transport.QUICConfig.HandshakeIdleTimeout = test.handshakeTimeout
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), test.requestTimeout)
+			defer cancel()
+			req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Do(req)
+			var timeout net.Error
+			if !errors.As(err, &timeout) || !timeout.Timeout() || !strings.Contains(err.Error(), "QUIC") {
+				t.Fatalf("missing typed QUIC request timeout: %v", err)
+			}
+			if test.requestTimeout < test.clientTimeout && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("request deadline cause was lost: %v", err)
+			}
+			if test.handshakeTimeout != 0 {
+				var idle *quic.IdleTimeoutError
+				var handshake *quic.HandshakeTimeoutError
+				if !errors.As(err, &idle) && !errors.As(err, &handshake) {
+					t.Fatalf("QUIC deadline cause was lost: %v", err)
+				}
+			}
+			if tcpConnections.Load() != 0 {
+				t.Fatal("fell back to TCP")
+			}
+		})
 	}
 }
 

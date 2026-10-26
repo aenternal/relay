@@ -964,3 +964,32 @@ Default-system-roots тест требует именно certificate rejection:
 `go test -race ./...` и `go vet ./...` прошли; TLS integration повторён пять раз.
 Windows grpcclient suite прошёл под Wine 10, darwin/arm64 test binary собирается.
 Native macOS и повторный удалённый CI после этого исправления ещё не запускались.
+
+### HTTP/3 timeout и независимые CI jobs
+
+В следующем предоставленном macOS core log gRPC suite прошёл; падение обнаружено
+в `TestNoTCPFallback`. Request context и QUIC idle timer настроены на одинаковый
+интервал, поэтому первым может вернуться `context.DeadlineExceeded` либо native
+QUIC timeout. Оба реализуют `net.Error` с `Timeout() == true`; QUIC timeout
+не обязан оборачивать context deadline. Production transport сохранял тип ошибки
+корректно, изменение потребовалось только тесту.
+
+Тест проверяет три варианта: более короткий request deadline, более короткий
+QUIC deadline и равные интервалы. Проверяются timeout interface, исходная причина
+и HTTP/3 diagnostic wrapper. Молчащий UDP listener исключает зависимость от
+реакции ОС на закрытый порт. Отсутствие fallback теперь подтверждается счётчиком
+принятых TCP connections, включая соединения, не дошедшие до HTTP handler.
+
+В core и desktop-native-build matrices задано `fail-fast: false`, чтобы ошибка
+одной ОС не отменяла проверки других. По умолчанию
+[GitHub Actions отменяет остальные jobs такой матрицы при ошибке](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstrategyfail-fast).
+Предоставленный Windows log показывает отмену compile/link/vet процессов,
+а не самостоятельную ошибку компиляции; инициатор отмены из выдержки неизвестен.
+
+Полные `go test ./...`, `go vet ./...` и HTTP/3 suite с race detector прошли;
+три timeout-сценария повторены 30 раз с race detector. Workflow YAML проверен,
+test binaries собираются для windows/amd64 и darwin/arm64. Запуск Windows HTTP/3
+suite под Wine 10 остановился на неподдерживаемом UDP ioctl (`wsaioctl 10045`),
+включая существующие UDP fixtures: эта среда не подтверждает Windows QUIC runtime.
+Новый удалённый CI и native macOS локально не запускались. Предупреждение macOS
+о размере receive buffer не являлось причиной указанного test failure.
