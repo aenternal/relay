@@ -936,3 +936,31 @@ gRPC test binary также скомпилирован для darwin/arm64. Wine
 не заменяют native Windows/macOS runners: повторный удалённый CI после этих
 исправлений ещё не выполнялся. Пакеты 0.1.0 из предыдущего этапа не пересобирались
 и не включают новое исправление gRPC.
+
+### Повторный macOS CI: диагностика TLS
+
+Повторный core job показал, что увеличение timeout до пяти секунд не устранило
+сбой default-roots сценария. В классификаторе были найдены две отдельные проблемы:
+не все ошибки native verifier имеют конкретный x509 subtype, а отмена handshake
+при закрытии соединения могла перезаписать уже сохранённую причину отказа.
+[Darwin verifier в Go](https://go.dev/src/crypto/x509/root_darwin.go) преобразует
+лишь часть кодов Security.framework в типизированные x509 errors; остальные
+ошибки проверки всё равно оборачиваются TLS в `CertificateVerificationError`.
+
+Добавлена безопасная категория `TLS certificate verification failed` после
+более конкретных x509 classifiers. Cancellation/deadline не стирают предыдущую
+диагностику; `Dial` сохраняет её до `conn.Close`. Исходный текст сертификата и
+платформенной ошибки не раскрывается. Проверка TLS остаётся включённой.
+
+Default-system-roots тест требует именно certificate rejection: один timeout
+или общий handshake failure не считается успешной проверкой. Дополнительный
+сценарий с пустым явным CA pool сохраняет точную проверку `trusted authority`.
+В тестовый self-signed сертификат добавлен непустой Subject/Issuer. По имеющемуся
+логу нельзя установить, какой именно Apple status был получен на runner.
+
+Новые credential-boundary regressions воспроизводят generic platform error и
+перезапись причины отменой на прежнем коде через Go overlay; после исправления
+они проходят, включая проверку отсутствия canary в диагностике. Полные
+`go test -race ./...` и `go vet ./...` прошли; TLS integration повторён пять раз.
+Windows grpcclient suite прошёл под Wine 10, darwin/arm64 test binary собирается.
+Native macOS и повторный удалённый CI после этого исправления ещё не запускались.

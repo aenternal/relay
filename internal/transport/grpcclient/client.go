@@ -146,8 +146,9 @@ func Dial(ctx context.Context, target string, options Options) (*Client, error) 
 	for {
 		state := conn.GetState()
 		if err := ctx.Err(); err != nil {
+			reason := attempts.reason()
 			_ = conn.Close()
-			return nil, fmt.Errorf("gRPC connect: %s: %w", attempts.reason(), err)
+			return nil, fmt.Errorf("gRPC connect: %s: %w", reason, err)
 		}
 		if state == connectivity.Ready {
 			return &Client{conn: conn, maxSend: options.MaxSendBytes, maxMetadata: options.MaxMetadataBytes, connectDuration: time.Since(started), resolver: options.Resolver}, nil
@@ -328,9 +329,15 @@ type connectionAttempts struct {
 }
 
 func (a *connectionAttempts) record(fallback string, err error) {
+	// Closing or timing out a dial cancels in-flight handshakes. That lifecycle
+	// error must not erase an earlier certificate or network failure.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
 	var unknown x509.UnknownAuthorityError
 	var hostname x509.HostnameError
 	var invalid x509.CertificateInvalidError
+	var verification *tls.CertificateVerificationError
 	var dns *net.DNSError
 	var networkError net.Error
 	switch {
@@ -340,6 +347,10 @@ func (a *connectionAttempts) record(fallback string, err error) {
 		fallback = "TLS certificate does not match the server name"
 	case errors.As(err, &invalid):
 		fallback = "TLS certificate is invalid or expired"
+	case errors.As(err, &verification):
+		// Platform verifiers can return errors without a concrete x509 subtype.
+		// Keep the certificate category without exposing peer-controlled text.
+		fallback = "TLS certificate verification failed"
 	case errors.As(err, &dns):
 		fallback = "DNS resolution failed"
 	case errors.Is(err, syscall.ECONNREFUSED):

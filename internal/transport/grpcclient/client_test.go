@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -532,7 +533,7 @@ func testTLSCertificate(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Relay test TLS CA"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -564,7 +565,10 @@ func TestTLSVerificationDefaultAndExplicitSettings(t *testing.T) {
 		options   Options
 		wantError string
 	}{
-		{name: "default roots reject untrusted CA", address: address, wantError: "trusted authority"},
+		// Native trust stores need not return UnknownAuthorityError, but the
+		// default must reject this certificate; a timeout alone is insufficient.
+		{name: "default roots reject untrusted CA", address: address, wantError: "TLS certificate"},
+		{name: "explicit roots reject untrusted CA", address: address, options: Options{TLSConfig: &tls.Config{RootCAs: x509.NewCertPool()}}, wantError: "trusted authority"},
 		{name: "explicit trusted CA", address: address, options: Options{TLSConfig: &tls.Config{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS12}}},
 		// Certificate verification can only be disabled by a request-scoped opt-in.
 		{name: "explicit insecure opt-in", address: address, options: Options{TLSConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}}},
@@ -573,8 +577,8 @@ func TestTLSVerificationDefaultAndExplicitSettings(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			// Allow platform trust-store initialization the same budget as
-			// other connections; test rejection reasons, not verification speed.
+			// Each connection gets its own budget; test certificate rejection
+			// independently of other failing connection attempts.
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			client, err := Dial(ctx, test.address, test.options)
