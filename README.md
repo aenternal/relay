@@ -1,7 +1,6 @@
 # Relay
 
-Локальный desktop API-клиент для HTTP, gRPC и WebSocket. Реализованы этапы 0–8
-[плана](PLAN_MULTIPROTOCOL_CLIENT.md), подготовлены локальные unsigned packages.
+Локальный desktop API-клиент для HTTP, gRPC и WebSocket. Реализован MVP, подготовлены локальные unsigned packages.
 Доступны все четыре типа gRPC RPC и server reflection,
 импорт Protobuf, редактор сообщений, HTTP-запросы из React UI через Go,
 workspace, коллекции, вложенные папки, вкладки, SQLite, окружения и системный
