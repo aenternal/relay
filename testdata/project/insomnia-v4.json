@@ -1,0 +1,23 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_source": "relay-owned-test-fixture",
+  "resources": [
+    {
+      "_id": "req_create", "_type": "request", "parentId": "fld_nested", "name": "Create item", "method": "POST", "url": "{{ _.base_url }}/items?tag=one&tag=two",
+      "headers": [{ "name": "X-Repeat", "value": "first" }, { "name": "X-Repeat", "value": "second", "disabled": true }, { "name": "Cookie", "value": "insomnia-cookie-canary" }],
+      "parameters": [{ "name": "token", "value": "insomnia-query-canary", "disabled": true }],
+      "authentication": { "type": "bearer", "token": "{{ _.token }}", "prefix": "Bearer" },
+      "body": { "mimeType": "application/json", "text": "{\"count\":{{count}},\"echo\":\"insomnia-cookie-canary insomnia-query-canary insomnia-token-canary\"}" },
+      "preRequestScript": "throw new Error('never executed')"
+    },
+    { "_id": "fld_nested", "_type": "request_group", "parentId": "fld_root", "name": "Nested" },
+    { "_id": "wrk_test", "_type": "workspace", "name": "Example Insomnia API" },
+    { "_id": "fld_root", "_type": "request_group", "parentId": "wrk_test", "name": "Items", "environment": { "scoped": "unsupported" } },
+    { "_id": "env_base", "_type": "environment", "parentId": "wrk_test", "name": "Base", "data": { "base_url": "https://api.example.test", "token": "insomnia-token-canary", "count": 9007199254740993 } },
+    { "_id": "env_dev", "_type": "environment", "parentId": "env_base", "name": "Development", "data": { "base_url": "https://dev.example.test" } },
+    { "_id": "req_form", "_type": "request", "parentId": "wrk_test", "name": "Form", "method": "POST", "url": "https://api.example.test/form", "body": { "mimeType": "application/x-www-form-urlencoded", "params": [{ "name": "field", "value": "yes" }, { "name": "off", "value": "no", "disabled": true }] }, "authentication": { "type": "none" } },
+    { "_id": "req_file", "_type": "request", "parentId": "wrk_test", "name": "Upload", "method": "POST", "url": "https://api.example.test/upload", "body": { "mimeType": "multipart/form-data", "params": [{ "name": "text", "value": "hello" }, { "name": "upload", "type": "file", "fileName": "/private/source-canary.txt" }] } },
+    { "_id": "req_ws", "_type": "websocket_request", "parentId": "wrk_test", "name": "Unsupported WebSocket", "url": "wss://api.example.test" }
+  ]
+}

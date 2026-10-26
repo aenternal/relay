@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package relay.streaming.v1;
+
+message Ping {
+  string text = 1;
+  int64 sequence = 2;
+}
+
+// StreamService exercises all streaming cardinalities without generated code.
+service StreamService {
+  rpc Watch(Ping) returns (stream Ping);
+  rpc Collect(stream Ping) returns (Ping);
+  rpc Chat(stream Ping) returns (stream Ping);
+}

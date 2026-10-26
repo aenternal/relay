@@ -1,0 +1,34 @@
+{
+  "info": { "name": "Example Postman API", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  "variable": [
+    { "key": "base_url", "value": "https://api.example.test" },
+    { "key": "region", "value": "eu" },
+    { "key": "api_token", "value": "postman-env-canary" }
+  ],
+  "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "postman-auth-canary", "type": "string" }] },
+  "event": [{ "listen": "prerequest", "script": { "exec": ["throw new Error('never executed')"] } }],
+  "item": [
+    {
+      "name": "Accounts",
+      "auth": { "type": "basic", "basic": [{ "key": "username", "value": "postman-user-canary" }, { "key": "password", "value": "postman-password-canary" }] },
+      "item": [
+        {
+          "name": "Nested",
+          "item": [{
+            "name": "Create account",
+            "event": [{ "listen": "test", "script": { "exec": ["pm.test('not imported')"] } }],
+            "request": {
+              "method": "POST",
+              "url": { "raw": "{{base_url}}/accounts/:id?ignored=raw", "query": [{ "key": "tag", "value": "one" }, { "key": "tag", "value": "two", "disabled": true }, { "key": "token", "value": "postman-query-canary" }], "variable": [{ "key": "id", "value": "42" }] },
+              "header": [{ "key": "X-Repeat", "value": "first" }, { "key": "X-Repeat", "value": "second", "disabled": true }, { "key": "Authorization", "value": "Bearer postman-header-canary" }],
+              "auth": { "type": "noauth" },
+              "body": { "mode": "raw", "raw": "{\"region\":\"{{ region }}\",\"echo\":\"postman-auth-canary postman-env-canary postman-user-canary postman-password-canary postman-query-canary postman-header-canary\"}", "options": { "raw": { "language": "json" } } }
+            }
+          }]
+        }
+      ]
+    },
+    { "name": "Form", "request": { "method": "POST", "url": "https://api.example.test/form?a=1&a=2", "body": { "mode": "urlencoded", "urlencoded": [{ "key": "field", "value": "{{region}}" }, { "key": "off", "value": "no", "disabled": true }] } } },
+    { "name": "Upload", "request": { "method": "POST", "url": "https://api.example.test/upload", "body": { "mode": "formdata", "formdata": [{ "key": "text", "value": "hello", "type": "text" }, { "key": "upload", "type": "file", "src": "/private/source-canary.txt" }] } } }
+  ]
+}

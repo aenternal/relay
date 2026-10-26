@@ -1,0 +1,267 @@
+package cli
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/tls"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
+	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"onyx-server/internal/domain/entities/gen"
+)
+
+type HealthcheckOptions struct {
+	Port       string
+	WithTLS    bool
+	CheckHTTP3 bool
+}
+
+func newHealthcheckCommand() *cobra.Command {
+	options := HealthcheckOptions{
+		Port:    "44044",
+		WithTLS: true,
+	}
+
+	cmd := &cobra.Command{
+		Use:   "healthcheck",
+		Short: "Run Onyx server health checks",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return RunHealthcheck(options)
+		},
+	}
+
+	cmd.Flags().StringVar(&options.Port, "port", options.Port, "server port")
+	cmd.Flags().BoolVar(&options.WithTLS, "tls", options.WithTLS, "Is with TLS?")
+	cmd.Flags().BoolVar(&options.CheckHTTP3, "http3", false, "Check HTTP/3 (QUIC) connection")
+
+	return cmd
+}
+
+func RunHealthcheck(options HealthcheckOptions) error {
+	if err := checkHTTP2(options.Port, options.WithTLS); err != nil {
+		return fmt.Errorf("HTTP/2 check failed: %w", err)
+	}
+	fmt.Println("HTTP/2 (TCP): ok")
+
+	if options.CheckHTTP3 {
+		if !options.WithTLS {
+			return fmt.Errorf("HTTP/3 requires TLS to be enabled")
+		}
+		if err := checkHTTP3Connection(options.Port); err != nil {
+			return fmt.Errorf("HTTP/3 check failed: %w", err)
+		}
+		if err := checkHTTP3Watch(options.Port); err != nil {
+			return fmt.Errorf("HTTP/3 stream check failed: %w", err)
+		}
+		fmt.Println("HTTP/3 (QUIC): ok")
+	}
+
+	fmt.Println("All checks passed")
+
+	return nil
+}
+
+func checkHTTP2(port string, withTLS bool) error {
+	var creds grpc.DialOption
+
+	if withTLS {
+		crd := credentials.NewTLS(&tls.Config{
+			InsecureSkipVerify: true,
+		})
+		creds = grpc.WithTransportCredentials(crd)
+	} else {
+		creds = grpc.WithTransportCredentials(insecure.NewCredentials())
+	}
+
+	conn, err := grpc.NewClient(grpcAddress(port), creds)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
+	defer conn.Close()
+
+	client := gen.NewHealthClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	healthCheckResponse, err := client.Check(ctx, &gen.HealthCheckRequest{})
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+
+	if healthCheckResponse.Status != gen.HealthCheckResponse_SERVING {
+		return fmt.Errorf("unexpected status: %s", healthCheckResponse.Status)
+	}
+
+	return nil
+}
+
+func checkHTTP3Connection(port string) error {
+	addr := grpcAddress(port)
+	url := fmt.Sprintf("https://%s/ru.mascot.server.Health/Check", addr)
+
+	tlsConf := &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"h3"},
+	}
+
+	roundTripper := &http3.Transport{
+		TLSClientConfig: tlsConf,
+		QUICConfig: &quic.Config{
+			MaxIdleTimeout: 10 * time.Second,
+		},
+	}
+	defer roundTripper.Close()
+
+	httpClient := &http.Client{
+		Transport: roundTripper,
+		Timeout:   10 * time.Second,
+	}
+
+	reqProto := &gen.HealthCheckRequest{}
+	reqBytes, err := proto.Marshal(reqProto)
+	if err != nil {
+		return fmt.Errorf("failed to marshal proto: %w", err)
+	}
+
+	body := make([]byte, 5+len(reqBytes))
+	body[0] = 0
+	body[1] = byte(len(reqBytes) >> 24)
+	body[2] = byte(len(reqBytes) >> 16)
+	body[3] = byte(len(reqBytes) >> 8)
+	body[4] = byte(len(reqBytes))
+	copy(body[5:], reqBytes)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/grpc")
+	req.Header.Set("TE", "trailers")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP/3 request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.ProtoMajor != 3 {
+		return fmt.Errorf("expected HTTP/3, got %s", resp.Proto)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("gRPC error: %s", resp.Status)
+	}
+
+	healthResp := &gen.HealthCheckResponse{}
+	if err := readGRPCMessage(resp.Body, healthResp); err != nil {
+		return fmt.Errorf("failed to read gRPC response: %w", err)
+	}
+
+	if healthResp.Status != gen.HealthCheckResponse_SERVING {
+		return fmt.Errorf("unexpected health status: %s", healthResp.Status)
+	}
+
+	fmt.Println("HTTP/3 Check: status is SERVING")
+	return nil
+}
+
+func checkHTTP3Watch(port string) error {
+	addr := grpcAddress(port)
+	url := fmt.Sprintf("https://%s/ru.mascot.server.Health/Watch", addr)
+
+	roundTripper := &http3.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h3"}},
+	}
+	defer roundTripper.Close()
+
+	httpClient := &http.Client{Transport: roundTripper}
+
+	reqProto := &gen.HealthCheckRequest{}
+	reqBytes, _ := proto.Marshal(reqProto)
+
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.BigEndian, uint8(0))
+	binary.Write(buf, binary.BigEndian, uint32(len(reqBytes)))
+	buf.Write(reqBytes)
+
+	req, _ := http.NewRequest("POST", url, buf)
+	req.Header.Set("Content-Type", "application/grpc")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	timeout := time.After(5 * time.Second)
+
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for SERVING status in Watch")
+		default:
+			healthResp := &gen.HealthCheckResponse{}
+			if err := readGRPCMessage(resp.Body, healthResp); err != nil {
+				return fmt.Errorf("watch stream closed: %w", err)
+			}
+
+			if healthResp.Status == gen.HealthCheckResponse_SERVING {
+				fmt.Println("HTTP/3 Watch: received SERVING status")
+				return nil
+			}
+
+			fmt.Printf("HTTP/3 Watch: current status is %s, waiting...\n", healthResp.Status)
+		}
+	}
+}
+
+func readGRPCMessage(r io.Reader, out proto.Message) error {
+	header := make([]byte, 5)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return err
+	}
+
+	isCompressed := header[0] == 1
+	length := binary.BigEndian.Uint32(header[1:])
+
+	data := make([]byte, length)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return err
+	}
+
+	var finalData []byte
+	if isCompressed {
+		gz, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer gz.Close()
+
+		finalData, err = io.ReadAll(gz)
+		if err != nil {
+			return fmt.Errorf("failed to decompress gzip: %w", err)
+		}
+	} else {
+		finalData = data
+	}
+
+	return proto.Unmarshal(finalData, out)
+}
+
+func grpcAddress(port string) string {
+	return fmt.Sprintf("localhost:%s", port)
+}

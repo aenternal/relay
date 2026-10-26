@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package relay.test.v1;
+
+import "relay/v1/common/payload.proto";
+import "google/protobuf/any.proto";
+
+// EchoService exercises both dynamic unary and bidirectional calls.
+service EchoService {
+  rpc Unary(EchoRequest) returns (EchoResponse);
+  rpc Chat(stream EchoRequest) returns (stream EchoResponse);
+}
+
+message EchoRequest {
+  string text = 1;
+  int64 sequence = 2;
+  relay.test.common.Payload payload = 3;
+  google.protobuf.Any extra = 4;
+  oneof selection {
+    string choice_text = 5;
+    int32 choice_number = 6;
+  }
+}
+
+message EchoResponse {
+  string text = 1;
+  int64 sequence = 2;
+}

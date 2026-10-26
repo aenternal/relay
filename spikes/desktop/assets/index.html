@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay — stage 0</title>
+<style>
+  :root { color-scheme: dark light; font-family: system-ui, sans-serif; }
+  body { max-width: 760px; margin: 48px auto; padding: 0 24px; }
+  button { padding: 10px 16px; margin: 0 8px 12px 0; cursor: pointer; }
+  pre { padding: 16px; background: light-dark(#eee, #222); border-radius: 8px; white-space: pre-wrap; }
+</style>
+<h1>Relay · проверка Wails v3</h1>
+<p>Технический прототип этапа 0: передача 10 000 событий пакетами, ограничение очереди и отмена долгой задачи.</p>
+<button id="burst">10 000 событий</button>
+<button id="slow">Долгая задача</button>
+<button id="cancel" disabled>Отменить</button>
+<pre id="status" role="status">Подключение к Go…</pre>
+<p>Проверки HTTP и gRPC пока запускаются через CLI и интеграционные тесты. Полноценный интерфейс запланирован на этап 1.</p>
+<script type="module" src="/app.js"></script>
+</html>

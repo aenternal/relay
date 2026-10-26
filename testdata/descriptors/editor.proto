@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package relay.descriptor.v1;
+
+// Ping is an offline descriptor-import fixture.
+message Ping {
+  string text = 1;
+  int64 sequence = 2;
+}
+
+service DescriptorService {
+  rpc Echo(Ping) returns (Ping);
+}

@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package relay.test.matrix;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// EveryType covers the editor's scalar, collection and presence semantics.
+message EveryType {
+  int32 int32_value = 1;
+  sint32 sint32_value = 2;
+  sfixed32 sfixed32_value = 3;
+  uint32 uint32_value = 4;
+  fixed32 fixed32_value = 5;
+  int64 int64_value = 6;
+  sint64 sint64_value = 7;
+  sfixed64 sfixed64_value = 8;
+  uint64 uint64_value = 9;
+  fixed64 fixed64_value = 10;
+  float float_value = 11;
+  double double_value = 12;
+  bool bool_value = 13;
+  // Field comments are retained by descriptor exports.
+  string string_value = 14;
+  bytes bytes_value = 15;
+  Status status = 16;
+  optional int32 optional_count = 17;
+  repeated int64 sequences = 18;
+  map<int32, string> indexes = 19;
+  map<bool, uint64> toggles = 20;
+  map<string, Child> children = 21;
+  repeated Child items = 22;
+  oneof selection {
+    string selected_text = 23;
+    int32 selected_number = 24;
+  }
+  Child child = 25;
+  google.protobuf.Timestamp timestamp = 26;
+  google.protobuf.Duration duration = 27;
+  google.protobuf.FieldMask mask = 28;
+  google.protobuf.Struct object = 29;
+  google.protobuf.Value value = 30;
+  google.protobuf.ListValue list = 31;
+  google.protobuf.Any any = 32;
+  google.protobuf.Empty empty = 33;
+  google.protobuf.Int64Value wrapped_int64 = 34;
+  google.protobuf.UInt64Value wrapped_uint64 = 35;
+  google.protobuf.StringValue wrapped_string = 36;
+  google.protobuf.BytesValue wrapped_bytes = 37;
+  google.protobuf.BoolValue wrapped_bool = 38;
+  google.protobuf.DoubleValue wrapped_double = 39;
+  google.protobuf.FloatValue wrapped_float = 40;
+  google.protobuf.Int32Value wrapped_int32 = 41;
+  google.protobuf.UInt32Value wrapped_uint32 = 42;
+
+  message Nested {
+    string value = 1;
+  }
+}
+
+message Child {
+  string label = 1;
+  Child next = 2;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  READY = 1;
+}
+
+// MatrixService exposes every RPC shape for descriptor-only inspection.
+service MatrixService {
+  // Unary preserves an exact full method name.
+  rpc Unary(EveryType) returns (Child);
+  rpc Watch(EveryType) returns (stream Child);
+  rpc Upload(stream EveryType) returns (Child);
+  rpc Chat(stream EveryType) returns (stream Child);
+}

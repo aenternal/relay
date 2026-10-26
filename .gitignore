@@ -29,5 +29,28 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Local desktop spike and browser checks
+node_modules/
+playwright-report/
+test-results/
+spikes/desktop/relay-spike
+spikes/desktop/relay-spike.exe
+
+# Main desktop build and local data
+frontend/dist/*
+!frontend/dist/.keep
+frontend/*.tsbuildinfo
+cmd/desktop/relay
+cmd/desktop/relay.exe
+cmd/desktop/desktop
+cmd/desktop/desktop.exe
+relay.db
+relay.db-wal
+relay.db-shm
+relay.lock
+
+# Local release packages
+/dist/release/
