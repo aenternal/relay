@@ -905,3 +905,34 @@ unknown secrets в явно включённых bodies и непрерывае�
 остаются описанными residual risks. Новые optional features (OpenAPI/OAuth2,
 scripts/runners, WS reconnect/H2/H3) не входят в завершённые этапы.
 История HTTP/gRPC остаётся в памяти и не является долговременным архивом вызовов.
+
+## Исправления CI на 2026-10-26
+
+По результатам первых Windows/macOS core jobs исправлены платформенные
+предположения тестов. Проверки содержимого скачивания, SQLite CRUD и типов файлов
+выполняются на всех ОС; точные Unix permissions проверяются вне Windows, где
+`os.Stat` не отражает ACL. Lifecycle fixture задаёт `TMPDIR`, `TMP` и `TEMP`,
+поэтому Windows response spools попадают в проверяемый временный каталог.
+Диагностика missing import сравнивается с каноническим include path после
+`filepath.EvalSymlinks`, включая раскрытие Windows 8.3 names.
+
+TLS-тесты получили независимые пятисекундные contexts вместо общего deadline
+и 250 ms на загрузку системного trust store. Проверки отказа для недоверенного
+CA и неверного имени сервера сохранены; production TLS policy не изменялась.
+
+Дополнительно race detector выявил чтение gRPC trailers до завершения транспорта,
+когда client-streaming peer отправляет лишний ответ. `RecvResult` теперь отменяет
+транспорт и ждёт `grpc.OnFinish` перед чтением trailers, сохраняя исходный статус
+ошибки. Regression fixture оставляет некорректный RPC открытым и проверяет его
+завершение и отмену peer без ожидания deadline. Trailers завершённых корректных
+RPC по-прежнему обязательны; незавершённый нарушающий протокол peer может их
+не передать.
+
+Полные `go test -race ./...`, `go vet ./...` и `git diff --check` прошли.
+TLS scenarios повторены пять раз, streaming/cardinality/concurrent observations
+— 30 раз с race detector. Windows test binaries пакетов app, importer, storage
+и grpcclient прошли полные suites под Wine 10; download/shutdown повторены трижды.
+gRPC test binary также скомпилирован для darwin/arm64. Wine и cross-compilation
+не заменяют native Windows/macOS runners: повторный удалённый CI после этих
+исправлений ещё не выполнялся. Пакеты 0.1.0 из предыдущего этапа не пересобирались
+и не включают новое исправление gRPC.

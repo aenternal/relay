@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -115,11 +116,26 @@ func TestMigrateReopenAndCRUD(t *testing.T) {
 	if err = db.sql.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil || journal != "wal" {
 		t.Fatalf("journal %q: %v", journal, err)
 	}
-	if info, err := os.Stat(filename); err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("database mode: %v %v", info, err)
+	info, err := os.Stat(filename)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if info, err := os.Stat(filepath.Dir(filename)); err != nil || info.Mode().Perm() != 0700 {
-		t.Fatalf("directory mode: %v %v", info, err)
+	if !info.Mode().IsRegular() {
+		t.Fatalf("database is not a regular file: %v", info.Mode())
+	}
+	// Windows FileMode reflects the read-only attribute, not ACL permissions.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Fatalf("database mode: %v", info.Mode())
+	}
+	info, err = os.Stat(filepath.Dir(filename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("database parent is not a directory: %v", info.Mode())
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0700 {
+		t.Fatalf("directory mode: %v", info.Mode())
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -592,7 +593,12 @@ func TestHTTPBinaryPreviewKeepsFullDownloadAndSpoolPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0077 != 0 {
+	if !info.Mode().IsRegular() {
+		t.Fatalf("download is not a regular file: %v", info.Mode())
+	}
+	// Windows reports synthetic permission bits; access there is controlled by
+	// the destination directory's inherited ACL, not Unix group/other bits.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
 		t.Fatalf("download permissions are too broad: %v", info.Mode())
 	}
 }

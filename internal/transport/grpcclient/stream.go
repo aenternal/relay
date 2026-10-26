@@ -29,6 +29,7 @@ type Stream struct {
 	path    string
 	maxSend int
 	cancel  context.CancelFunc
+	done    <-chan struct{}
 	started time.Time
 	peer    *peer.Peer
 	sendMu  sync.Mutex
@@ -70,11 +71,12 @@ func (c *Client) NewStream(ctx context.Context, method protoreflect.MethodDescri
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	s := &Stream{method: method, path: path, maxSend: c.maxSend, cancel: cancel, started: time.Now()}
+	done := make(chan struct{})
+	s := &Stream{method: method, path: path, maxSend: c.maxSend, cancel: cancel, done: done, started: time.Now()}
 	codec := boundedProtoCodec{resolver: c.resolver, capture: func(wire []byte) {
 		s.receiveWire = append([]byte(nil), wire...)
 	}}
-	stream, err := c.conn.NewStream(ctx, &grpc.StreamDesc{ClientStreams: method.IsStreamingClient(), ServerStreams: method.IsStreamingServer()}, path, grpc.ForceCodecV2(codec))
+	stream, err := c.conn.NewStream(ctx, &grpc.StreamDesc{ClientStreams: method.IsStreamingClient(), ServerStreams: method.IsStreamingServer()}, path, grpc.ForceCodecV2(codec), grpc.OnFinish(func(error) { close(done) }))
 	if err != nil {
 		cancel()
 		return nil, rpcError("open stream", path, err)
@@ -151,12 +153,17 @@ func (s *Stream) RecvResult() (*StreamMessage, error) {
 	if errors.Is(err, io.EOF) {
 		finalStatus = status.New(codes.OK, "")
 	}
+	// grpc-go's client-streaming wrapper can report a cardinality violation
+	// before its underlying transport has finished. Stop that transport and
+	// wait for OnFinish before reading trailers, which are otherwise still
+	// being written by the HTTP/2 reader. Preserve the original receive status.
+	s.cancel()
+	<-s.done
 	s.stateMu.Lock()
 	s.finished, s.finalErr, s.finalStatus = true, rpcErr, finalStatus
 	s.trailers = s.stream.Trailer().Copy()
 	s.duration = time.Since(s.started)
 	s.stateMu.Unlock()
-	s.cancel()
 	return nil, rpcErr
 }
 

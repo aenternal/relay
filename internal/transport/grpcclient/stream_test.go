@@ -140,10 +140,53 @@ func TestClientStreamResponseCardinality(t *testing.T) {
 			} else if result != nil || status.Code(err) != codes.Internal || stream.Status().Code() != codes.Internal {
 				t.Fatalf("invalid cardinality accepted: count=%d result=%v error=%v status=%v", count, result, err, stream.Status())
 			}
-			if got := stream.Trailers().Get("done"); len(got) != 1 || got[0] != "cardinality" {
+			// A multi-response protocol violation may be detected before the
+			// peer sends trailers; only completed responses guarantee them.
+			if got := stream.Trailers().Get("done"); count < 2 && (len(got) != 1 || got[0] != "cardinality") {
 				t.Fatalf("cardinality response lost trailers: %v", stream.Trailers())
 			}
 		})
+	}
+}
+
+func TestClientStreamCardinalityErrorCancelsOpenPeer(t *testing.T) {
+	method := testMethods(t)["Collect"]
+	peerCanceled := make(chan struct{})
+	address := startStreamTestServer(t, method, func(_ any, server grpc.ServerStream) error {
+		if err := server.RecvMsg(dynamicpb.NewMessage(method.Input())); !errors.Is(err, io.EOF) {
+			return status.Error(codes.Internal, "expected request half-close")
+		}
+		for range 2 {
+			if err := server.SendMsg(response(method, request(method, "result", 1))); err != nil {
+				return err
+			}
+		}
+		// The peer deliberately never completes the invalid RPC on its own.
+		<-server.Context().Done()
+		close(peerCanceled)
+		return status.FromContextError(server.Context().Err()).Err()
+	})
+	client := testClient(t, address, Options{Plaintext: true})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := client.NewStream(ctx, method, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Cancel()
+	if err := stream.CloseSend(); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := stream.RecvResult(); result != nil || status.Code(err) != codes.Internal || ctx.Err() != nil {
+		t.Fatalf("cardinality error must finish before the RPC deadline: result=%v err=%v context=%v", result, err, ctx.Err())
+	}
+	select {
+	case <-peerCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("cardinality error did not cancel the peer RPC")
+	}
+	if stream.Status().Code() != codes.Internal {
+		t.Fatalf("cancellation replaced the cardinality status: %v", stream.Status())
 	}
 }
 

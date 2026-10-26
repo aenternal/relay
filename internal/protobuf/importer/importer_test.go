@@ -43,14 +43,20 @@ func TestCompileNestedImportsAndMethods(t *testing.T) {
 
 func TestCompileMissingImportDiagnostic(t *testing.T) {
 	dir := t.TempDir()
+	// Diagnostics use canonical include paths, which can expand Windows 8.3
+	// names or resolve a symlink in the temporary directory's parent path.
+	canonicalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "broken.proto"), []byte("syntax = \"proto3\";\nimport \"missing/types.proto\";\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := importer.Compile(context.Background(), []string{"broken.proto"}, []string{dir})
+	_, err = importer.Compile(context.Background(), []string{"broken.proto"}, []string{dir})
 	if err == nil {
 		t.Fatal("expected missing import error")
 	}
-	for _, want := range []string{"broken.proto:2:", "missing/types.proto", dir} {
+	for _, want := range []string{"broken.proto:2:", "missing/types.proto", canonicalDir} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("diagnostic %q lacks %q", err, want)
 		}

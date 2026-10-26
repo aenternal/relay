@@ -21,7 +21,10 @@ import (
 // goroutines, whose lifetime depends on the Go resolver and HTTP test servers.
 func TestShutdownClosesMixedProtocolsAndDisposesTransientResources(t *testing.T) {
 	spools := t.TempDir()
-	t.Setenv("TMPDIR", spools)
+	// Unix uses TMPDIR; Windows GetTempPath uses TMP or TEMP instead.
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, spools)
+	}
 	grpcFixture := startGRPCStreamFixture(t)
 	svc, grpcRequest, _ := newGRPCStreamApp(t, grpcFixture, "Watch")
 	t.Cleanup(func() { _ = app.Shutdown(svc) })

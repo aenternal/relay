@@ -557,27 +557,45 @@ func TestTLSVerificationDefaultAndExplicitSettings(t *testing.T) {
 	methods := testMethods(t)
 	certificate, roots := testTLSCertificate(t)
 	address := startTestServer(t, methods, grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := Dial(ctx, address, Options{ConnectTimeout: 250 * time.Millisecond}); err == nil || !strings.Contains(err.Error(), "trusted authority") {
-		t.Fatalf("default TLS must reject untrusted CA with reason: %v", err)
-	}
-	for _, config := range []*tls.Config{
-		{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS12},
-		{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}, // Explicit request-scoped opt-in.
-	} {
-		client := testClient(t, address, Options{TLSConfig: config})
-		if _, err := client.Unary(ctx, methods["Unary"], request(methods["Unary"], "tls", 0), nil); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := Dial(ctx, address, Options{TLSConfig: &tls.Config{RootCAs: roots, ServerName: "wrong.example"}, ConnectTimeout: 250 * time.Millisecond}); err == nil || !strings.Contains(err.Error(), "server name") {
-		t.Fatalf("wrong certificate name was accepted or lacked reason: %v", err)
-	}
 	mtlsAddress := startTestServer(t, methods, grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{certificate}, ClientCAs: roots, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12})))
-	client := testClient(t, mtlsAddress, Options{TLSConfig: &tls.Config{RootCAs: roots, Certificates: []tls.Certificate{certificate}, ServerName: "localhost", MinVersion: tls.VersionTLS12}})
-	if _, err := client.Unary(ctx, methods["Unary"], request(methods["Unary"], "mtls", 0), nil); err != nil {
-		t.Fatal(err)
+	for _, test := range []struct {
+		name      string
+		address   string
+		options   Options
+		wantError string
+	}{
+		{name: "default roots reject untrusted CA", address: address, wantError: "trusted authority"},
+		{name: "explicit trusted CA", address: address, options: Options{TLSConfig: &tls.Config{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS12}}},
+		// Certificate verification can only be disabled by a request-scoped opt-in.
+		{name: "explicit insecure opt-in", address: address, options: Options{TLSConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}}},
+		{name: "trusted CA rejects wrong server name", address: address, options: Options{TLSConfig: &tls.Config{RootCAs: roots, ServerName: "wrong.example"}}, wantError: "server name"},
+		{name: "mutual TLS", address: mtlsAddress, options: Options{TLSConfig: &tls.Config{RootCAs: roots, Certificates: []tls.Certificate{certificate}, ServerName: "localhost", MinVersion: tls.VersionTLS12}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			// Allow platform trust-store initialization the same budget as
+			// other connections; test rejection reasons, not verification speed.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			client, err := Dial(ctx, test.address, test.options)
+			if client != nil {
+				t.Cleanup(func() { _ = client.Close() })
+			}
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("TLS must reject connection with reason %q: %v", test.wantError, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			rpcCtx, rpcCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer rpcCancel()
+			if _, err := client.Unary(rpcCtx, methods["Unary"], request(methods["Unary"], "tls", 0), nil); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
